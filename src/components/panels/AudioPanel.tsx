@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { useProjectStore } from '../../state/projectStore';
 import { AudioTrack } from '../../types/project';
 import { audioEngine } from '../../services/audioEngine';
+import { MediaAssetService } from '../../services/mediaAssetService';
 import {
   Sliders,
   Shuffle,
@@ -52,11 +53,12 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({ onOpenSettings }) => {
       tempAudio.src = audioUrl;
 
       tempAudio.onloadedmetadata = () => {
-        const dur = Math.round(tempAudio.duration) || 180;
+        const dur = Math.max(1, Math.round(tempAudio.duration || 180));
+        const ext = file.name.split('.').pop()?.toUpperCase() || 'AUDIO';
         const newTrack: AudioTrack = {
-          id: `audio-${Date.now()}-${i}`,
+          id: `audio-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
           name: file.name,
-          info: `${formatDuration(dur)} • 44.1kHz / 24-bit`,
+          info: `${formatDuration(dur)} • ${ext}`,
           duration: dur,
           sampleRate: '44.1 kHz',
           bitrate: '24-bit',
@@ -69,6 +71,8 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({ onOpenSettings }) => {
           isMuted: false,
           isSolo: false,
         };
+
+        MediaAssetService.registerFile(newTrack.id, file);
 
         setProject((prev) => ({
           audioTracks: [...prev.audioTracks, newTrack],
@@ -92,6 +96,13 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({ onOpenSettings }) => {
   };
 
   const deleteTrack = (id: string) => {
+    const track = project.audioTracks.find((t) => t.id === id);
+    if (track) {
+      audioEngine.disposeTrack(track);
+    }
+    if (playingTrackId === id) {
+      setPlayingTrackId(null);
+    }
     setProject((prev) => ({
       audioTracks: prev.audioTracks.filter((t) => t.id !== id),
     }));
@@ -114,8 +125,11 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({ onOpenSettings }) => {
       audioEngine.pausePlayback();
       setPlayingTrackId(null);
     } else {
-      audioEngine.startPlayback(track.url);
-      setPlayingTrackId(track.id);
+      audioEngine.playSingleTrack(track).then(() => {
+        setPlayingTrackId(track.id);
+      }).catch(() => {
+        setPlayingTrackId(null);
+      });
     }
   };
 
@@ -230,18 +244,27 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({ onOpenSettings }) => {
 
         {/* Audio Track List */}
         <div className="flex-1 flex flex-col gap-1 overflow-y-auto pr-0.5">
-          {project.audioTracks.map((track, index) => {
-            const isFirst = index === 0;
-            const isLast = index === project.audioTracks.length - 1;
-            const isPlaying = playingTrackId === track.id;
+          {project.audioTracks.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center p-4 border border-dashed border-[#E5E7EB] rounded bg-[#FAF9FE]/50 text-[#717786]">
+              <Music size={22} className="text-[#A0A4AE] mb-1.5" />
+              <p className="text-[11px] font-medium text-[#1D1D1F]">Belum ada track audio</p>
+              <p className="text-[9.5px] text-[#6E6E73] mt-0.5 max-w-[200px]">
+                Upload file audio MP3, WAV, atau AAC untuk mengatur Master Timeline & Beat Engine.
+              </p>
+            </div>
+          ) : (
+            project.audioTracks.map((track, index) => {
+              const isFirst = index === 0;
+              const isLast = index === project.audioTracks.length - 1;
+              const isPlaying = playingTrackId === track.id;
 
-            return (
-              <div
-                key={track.id}
-                draggable
-                onDragStart={() => setDraggedIdx(index)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => {
+              return (
+                <div
+                  key={track.id}
+                  draggable
+                  onDragStart={() => setDraggedIdx(index)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => {
                   if (draggedIdx === null || draggedIdx === index) return;
                   const list = [...project.audioTracks];
                   const item = list.splice(draggedIdx, 1)[0];
@@ -324,7 +347,7 @@ export const AudioPanel: React.FC<AudioPanelProps> = ({ onOpenSettings }) => {
                 </div>
               </div>
             );
-          })}
+          }))}
         </div>
 
         {/* Footer info */}

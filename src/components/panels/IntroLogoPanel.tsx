@@ -15,27 +15,30 @@ import {
 export const IntroLogoPanel: React.FC = () => {
   const [project, setProject] = useProjectStore();
   const [showTypoModal, setShowTypoModal] = useState(false);
+  const [activeIntroId, setActiveIntroId] = useState<string>(project.intros[0]?.id || 'intro-1');
   const logoFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const activeIntro = project.intros[0] || {
-    id: 'intro-1',
-    name: 'Intro 1',
-    text: 'ASTRA SPECTRA',
-    font: 'Inter',
-    fontSize: 36,
-    color: '#FFFFFF',
-    dropShadow: 60,
-    glow: 40,
-    stroke: 2,
-    animation: 'Typewriter',
-    opacity: 100,
-    startTime: 0,
-    duration: 3.2,
-    bgDim: 40,
-    posX: 50,
-    posY: 50,
-    isVisible: true,
-  };
+  const activeIntro =
+    project.intros.find((i) => i.id === activeIntroId) ||
+    project.intros[0] || {
+      id: 'intro-1',
+      name: 'Intro 1',
+      text: 'ASTRA SPECTRA',
+      font: 'Inter',
+      fontSize: 36,
+      color: '#FFFFFF',
+      dropShadow: 60,
+      glow: 40,
+      stroke: 2,
+      animation: 'Typewriter',
+      opacity: 100,
+      startTime: 0,
+      duration: 3.2,
+      bgDim: 40,
+      posX: 50,
+      posY: 50,
+      isVisible: true,
+    };
 
   const activeLogo = project.logos[0] || {
     id: 'logo-1',
@@ -54,8 +57,9 @@ export const IntroLogoPanel: React.FC = () => {
   // Add new intro layer
   const addIntro = () => {
     const newIdx = project.intros.length + 1;
+    const newId = `intro-${Date.now()}`;
     const newLayer = {
-      id: `intro-${Date.now()}`,
+      id: newId,
       name: `Intro ${newIdx}`,
       text: `DEEP FOCUS MUSIC`,
       font: 'Inter',
@@ -74,11 +78,16 @@ export const IntroLogoPanel: React.FC = () => {
       isVisible: true,
     };
     setProject((prev) => ({ intros: [...prev.intros, newLayer] }));
+    setActiveIntroId(newId);
   };
 
   const removeIntro = (id: string) => {
     if (project.intros.length <= 1) return;
-    setProject((prev) => ({ intros: prev.intros.filter((i) => i.id !== id) }));
+    const remaining = project.intros.filter((i) => i.id !== id);
+    setProject({ intros: remaining });
+    if (activeIntroId === id) {
+      setActiveIntroId(remaining[0]?.id || '');
+    }
   };
 
   const updateActiveIntro = (updates: Partial<typeof activeIntro>) => {
@@ -148,7 +157,7 @@ export const IntroLogoPanel: React.FC = () => {
                   className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-semibold cursor-pointer ${
                     intro.id === activeIntro.id ? 'bg-[#007AFF] text-white' : 'bg-[#EEEDF3] text-[#1D1D1F]'
                   }`}
-                  onClick={() => updateActiveIntro({ id: intro.id })}
+                  onClick={() => setActiveIntroId(intro.id)}
                 >
                   <span>{intro.name || `Intro ${idx + 1}`}</span>
                   {project.intros.length > 1 && (

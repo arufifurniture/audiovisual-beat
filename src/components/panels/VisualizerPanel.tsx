@@ -1,30 +1,33 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useProjectStore } from '../../state/projectStore';
 import { VisualizerStyle, ColorMode } from '../../types/project';
 import { Activity, Plus, Waves, BarChart2, Palette, Zap, FlipHorizontal } from 'lucide-react';
 
 export const VisualizerPanel: React.FC = () => {
   const [project, setProject] = useProjectStore();
+  const [activeVizId, setActiveVizId] = useState<string>(project.visualizers[0]?.id || 'viz-layer-1');
 
-  const activeViz = project.visualizers[0] || {
-    id: 'viz-layer-1',
-    name: 'Visualizer 1',
-    style: 'Obsidian Grid',
-    sensitivity: 75,
-    attackMs: 24,
-    decayMs: 160,
-    barsCount: 64,
-    barWidth: 12,
-    colorMode: 'Gradient',
-    color1: '#00E5FF',
-    color2: '#0058BC',
-    opacity: 85,
-    glow: 40,
-    beatPunch: 15,
-    beatZoom: 115,
-    mirrorMode: true,
-    isVisible: true,
-  };
+  const activeViz =
+    project.visualizers.find((v) => v.id === activeVizId) ||
+    project.visualizers[0] || {
+      id: 'viz-layer-1',
+      name: 'Visualizer 1',
+      style: 'Obsidian Grid',
+      sensitivity: 75,
+      attackMs: 24,
+      decayMs: 160,
+      barsCount: 64,
+      barWidth: 12,
+      colorMode: 'Gradient',
+      color1: '#00E5FF',
+      color2: '#0058BC',
+      opacity: 85,
+      glow: 40,
+      beatPunch: 15,
+      beatZoom: 115,
+      mirrorMode: true,
+      isVisible: true,
+    };
 
   const updateActiveViz = (updates: Partial<typeof activeViz>) => {
     setProject((prev) => ({
@@ -34,8 +37,9 @@ export const VisualizerPanel: React.FC = () => {
 
   const addVisualizer = () => {
     const newCount = project.visualizers.length + 1;
+    const newId = `viz-layer-${Date.now()}`;
     const newViz = {
-      id: `viz-layer-${Date.now()}`,
+      id: newId,
       name: `Visualizer ${newCount}`,
       style: 'Velvet Rise' as VisualizerStyle,
       sensitivity: 70,
@@ -54,11 +58,16 @@ export const VisualizerPanel: React.FC = () => {
       isVisible: true,
     };
     setProject((prev) => ({ visualizers: [...prev.visualizers, newViz] }));
+    setActiveVizId(newId);
   };
 
   const removeVisualizer = (id: string) => {
     if (project.visualizers.length <= 1) return;
-    setProject((prev) => ({ visualizers: prev.visualizers.filter((v) => v.id !== id) }));
+    const remaining = project.visualizers.filter((v) => v.id !== id);
+    setProject({ visualizers: remaining });
+    if (activeVizId === id) {
+      setActiveVizId(remaining[0]?.id || '');
+    }
   };
 
   return (
@@ -93,7 +102,7 @@ export const VisualizerPanel: React.FC = () => {
             {project.visualizers.map((viz) => (
               <div
                 key={viz.id}
-                onClick={() => updateActiveViz({ id: viz.id })}
+                onClick={() => setActiveVizId(viz.id)}
                 className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[8.5px] font-semibold cursor-pointer shadow-2xs shrink-0 ${
                   viz.id === activeViz.id
                     ? 'bg-[#006B27] text-white'

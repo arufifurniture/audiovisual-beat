@@ -1,6 +1,9 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useProjectStore, togglePlayback, seekTime } from '../../state/projectStore';
 import { audioEngine } from '../../services/audioEngine';
+import { mediaAssetService } from '../../services/mediaAssetService';
+import { VisualSequenceEngine } from '../../services/visualSequenceEngine';
+import { VisualTrack } from '../../types/project';
 import { Maximize2, Download, Play, Pause, SkipBack, SkipForward, Repeat, Volume2 } from 'lucide-react';
 
 interface RealtimeViewportProps {
@@ -89,6 +92,125 @@ export const RealtimeViewport: React.FC<RealtimeViewportProps> = ({
       ctx.lineTo(w, y);
     }
     ctx.stroke();
+
+    // 0. REAL VISUAL MEDIA ASSET LAYER (Render original image or video from project data via VisualSequenceEngine)
+    const activeFrame = VisualSequenceEngine.getActiveFrame(
+      currentProject.visualTracks,
+      currentProject.currentTime,
+      currentProject.activeSelectionType === 'visual' ? currentProject.activeSelectionId : null
+    );
+    const activeTrack = activeFrame?.track || null;
+    const trackLocalTime = activeFrame?.localTime || 0;
+    const visibleTracks = currentProject.visualTracks.filter((t) => t.isVisible);
+
+    if (activeTrack && activeTrack.url) {
+      ctx.save();
+
+      // Blend Mode
+      if (activeTrack.blendMode === 'Screen') ctx.globalCompositeOperation = 'screen';
+      else if (activeTrack.blendMode === 'Multiply') ctx.globalCompositeOperation = 'multiply';
+      else if (activeTrack.blendMode === 'Add') ctx.globalCompositeOperation = 'lighter';
+      else if (activeTrack.blendMode === 'Overlay') ctx.globalCompositeOperation = 'overlay';
+      else ctx.globalCompositeOperation = 'source-over';
+
+      // Opacity
+      ctx.globalAlpha = Math.max(0, Math.min(1, activeTrack.opacity / 100));
+
+      // Transform (Scale & Rotation)
+      if (activeTrack.scale !== 1.0 || activeTrack.rotation !== 0) {
+        ctx.translate(w / 2, h / 2);
+        if (activeTrack.rotation !== 0) {
+          ctx.rotate((activeTrack.rotation * Math.PI) / 180);
+        }
+        if (activeTrack.scale !== 1.0) {
+          ctx.scale(activeTrack.scale, activeTrack.scale);
+        }
+        ctx.translate(-w / 2, -h / 2);
+      }
+
+      if (activeTrack.type === 'image') {
+        const img = mediaAssetService.getImageElement(activeTrack.url);
+        if (img.complete && img.naturalWidth > 0) {
+          const imgAspect = img.naturalWidth / img.naturalHeight;
+          const canvasAspect = w / h;
+          let dw = w;
+          let dh = h;
+          let dx = 0;
+          let dy = 0;
+          if (imgAspect > canvasAspect) {
+            dw = h * imgAspect;
+            dx = (w - dw) / 2;
+          } else {
+            dh = w / imgAspect;
+            dy = (h - dh) / 2;
+          }
+          ctx.drawImage(img, dx, dy, dw, dh);
+        }
+      } else if (activeTrack.type === 'video') {
+        const video = mediaAssetService.getVideoElement(activeTrack.url);
+
+        // Synchronize native video playback
+        if (isPlaying) {
+          if (video.paused) {
+            video.play().catch(() => {});
+          }
+        } else {
+          if (!video.paused) {
+            video.pause();
+          }
+          if (video.duration && Math.abs(video.currentTime - (trackLocalTime % video.duration)) > 0.4) {
+            video.currentTime = trackLocalTime % video.duration;
+          }
+        }
+
+        if (video.readyState >= 2) {
+          const vidAspect = (video.videoWidth || 16) / (video.videoHeight || 9);
+          const canvasAspect = w / h;
+          let dw = w;
+          let dh = h;
+          let dx = 0;
+          let dy = 0;
+          if (vidAspect > canvasAspect) {
+            dw = h * vidAspect;
+            dx = (w - dw) / 2;
+          } else {
+            dh = w / vidAspect;
+            dy = (h - dh) / 2;
+          }
+          ctx.drawImage(video, dx, dy, dw, dh);
+        }
+      }
+
+      ctx.restore();
+
+      // Pause any other inactive videos to save CPU & GPU
+      visibleTracks.forEach((t) => {
+        if (t.type === 'video' && t.url && t.id !== activeTrack?.id) {
+          const otherVid = mediaAssetService.getVideoElement(t.url);
+          if (!otherVid.paused) {
+            otherVid.pause();
+          }
+        }
+      });
+    } else if (visibleTracks.length === 0) {
+      // Clean Standby Indicator when no visual asset is loaded
+      ctx.save();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.font = `600 11px 'JetBrains Mono', monospace`;
+      ctx.textAlign = 'center';
+      if (currentProject.audioTracks.length > 0) {
+        ctx.fillText('AUDIO AKTIF • BELUM ADA VISUAL BACKGROUND', w / 2, h / 2 - 40);
+        ctx.font = `400 9.5px 'Inter', sans-serif`;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+        ctx.fillText('Upload file MP4/MOV/PNG/JPG di panel Visual untuk melengkapi komposisi', w / 2, h / 2 - 24);
+      } else {
+        ctx.fillText('STUDIO STANDBY • BELUM ADA MEDIA USER', w / 2, h / 2 - 40);
+        ctx.font = `400 9.5px 'Inter', sans-serif`;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+        ctx.fillText('Import file Audio (MP3/WAV) dan Visual (MP4/PNG) untuk memulai', w / 2, h / 2 - 24);
+      }
+      ctx.restore();
+    }
 
     // Camera Beat-Punch / Zoom
     const vizSettings = currentProject.visualizers[0];
@@ -261,6 +383,19 @@ export const RealtimeViewport: React.FC<RealtimeViewportProps> = ({
     drawFrame(performance.now());
   }, [project, drawFrame]);
 
+  // Pause all cached video elements and audio when project is not playing
+  useEffect(() => {
+    if (!project.isPlaying) {
+      audioEngine.pausePlayback();
+      project.visualTracks.forEach((t) => {
+        if (t.type === 'video' && t.url) {
+          const v = mediaAssetService.getVideoElement(t.url);
+          if (!v.paused) v.pause();
+        }
+      });
+    }
+  }, [project.isPlaying, project.visualTracks]);
+
   // Continuous animation loop only active when playing
   useEffect(() => {
     if (!project.isPlaying) return;
@@ -268,6 +403,9 @@ export const RealtimeViewport: React.FC<RealtimeViewportProps> = ({
     let animId: number;
     let lastFpsTime = performance.now();
     let frameCount = 0;
+    let lastTickTime = performance.now();
+    let localCurrentTime = projectRef.current.currentTime;
+    let lastStoreSync = performance.now();
 
     const renderLoop = (now: number) => {
       frameCount++;
@@ -277,6 +415,31 @@ export const RealtimeViewport: React.FC<RealtimeViewportProps> = ({
         lastFpsTime = now;
       }
 
+      // Progress timeline in real-time
+      const deltaSec = (now - lastTickTime) / 1000;
+      lastTickTime = now;
+      localCurrentTime += deltaSec;
+
+      const totalDur = projectRef.current.totalDuration;
+      if (totalDur > 0 && localCurrentTime >= totalDur) {
+        if (projectRef.current.isLooping) {
+          localCurrentTime = 0;
+        } else {
+          localCurrentTime = totalDur;
+          togglePlayback();
+          return;
+        }
+      }
+
+      // Synchronize audio playback & sequence tracking
+      audioEngine.syncSequence(localCurrentTime, projectRef.current.audioTracks, true);
+
+      // Sync time back to store periodically for timeline scrubber and UI
+      if (now - lastStoreSync >= 150) {
+        setProject({ currentTime: Math.round(localCurrentTime * 10) / 10 });
+        lastStoreSync = now;
+      }
+
       drawFrame(now);
       animId = requestAnimationFrame(renderLoop);
     };
@@ -284,8 +447,14 @@ export const RealtimeViewport: React.FC<RealtimeViewportProps> = ({
     animId = requestAnimationFrame(renderLoop);
     return () => {
       cancelAnimationFrame(animId);
+      projectRef.current.visualTracks.forEach((t) => {
+        if (t.type === 'video' && t.url) {
+          const v = mediaAssetService.getVideoElement(t.url);
+          if (!v.paused) v.pause();
+        }
+      });
     };
-  }, [project.isPlaying, drawFrame]);
+  }, [project.isPlaying, drawFrame, setProject]);
 
   // Canvas Mouse Interaction for Dragging Logo / Intro
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {

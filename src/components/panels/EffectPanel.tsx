@@ -1,29 +1,32 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useProjectStore } from '../../state/projectStore';
 import { EffectStyle, EffectDirection, EffectShape, BeatBand } from '../../types/project';
 import { Sparkles, Plus, Compass, Move, CircleDot, Palette, Sliders } from 'lucide-react';
 
 export const EffectPanel: React.FC = () => {
   const [project, setProject] = useProjectStore();
+  const [activeEffectId, setActiveEffectId] = useState<string>(project.effects[0]?.id || 'effect-tab-1');
 
-  const activeEffect = project.effects[0] || {
-    id: 'effect-tab-1',
-    name: 'Effect 1',
-    style: 'Debu',
-    direction: 'Rad',
-    speed: 24,
-    spread: 65,
-    count: 850,
-    size: 6,
-    life: 22,
-    shape: 'Bulat',
-    color: '#6664E4',
-    opacity: 75,
-    glow: 55,
-    audioTrigger: 'All',
-    sensitivity: 80,
-    isVisible: true,
-  };
+  const activeEffect =
+    project.effects.find((e) => e.id === activeEffectId) ||
+    project.effects[0] || {
+      id: 'effect-tab-1',
+      name: 'Effect 1',
+      style: 'Debu',
+      direction: 'Rad',
+      speed: 24,
+      spread: 65,
+      count: 850,
+      size: 6,
+      life: 22,
+      shape: 'Bulat',
+      color: '#6664E4',
+      opacity: 75,
+      glow: 55,
+      audioTrigger: 'All',
+      sensitivity: 80,
+      isVisible: true,
+    };
 
   const updateActiveEffect = (updates: Partial<typeof activeEffect>) => {
     setProject((prev) => ({
@@ -33,8 +36,9 @@ export const EffectPanel: React.FC = () => {
 
   const addEffect = () => {
     const newIdx = project.effects.length + 1;
+    const newId = `effect-tab-${Date.now()}`;
     const newEff = {
-      id: `effect-tab-${Date.now()}`,
+      id: newId,
       name: `Effect ${newIdx}`,
       style: 'Bokeh' as EffectStyle,
       direction: 'Rand' as EffectDirection,
@@ -52,11 +56,16 @@ export const EffectPanel: React.FC = () => {
       isVisible: true,
     };
     setProject((prev) => ({ effects: [...prev.effects, newEff] }));
+    setActiveEffectId(newId);
   };
 
   const removeEffect = (id: string) => {
     if (project.effects.length <= 1) return;
-    setProject((prev) => ({ effects: prev.effects.filter((e) => e.id !== id) }));
+    const remaining = project.effects.filter((e) => e.id !== id);
+    setProject({ effects: remaining });
+    if (activeEffectId === id) {
+      setActiveEffectId(remaining[0]?.id || '');
+    }
   };
 
   const styles: EffectStyle[] = ['Debu', 'Hujan', 'Salju', 'Percikan', 'Bara', 'Bokeh', 'Bintang', 'Garis Neon', 'Asap', 'Ledakan Radial'];
@@ -95,7 +104,7 @@ export const EffectPanel: React.FC = () => {
             {project.effects.map((eff) => (
               <div
                 key={eff.id}
-                onClick={() => updateActiveEffect({ id: eff.id })}
+                onClick={() => setActiveEffectId(eff.id)}
                 className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[8.5px] font-semibold cursor-pointer shadow-2xs shrink-0 ${
                   eff.id === activeEffect.id
                     ? 'bg-[#5856D6] text-white'

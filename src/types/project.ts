@@ -16,6 +16,7 @@ export interface VisualTrack {
   info: string;
   duration: number; // in seconds
   url?: string;
+  thumbnailUrl?: string;
   resolution: string;
   fps: number;
   opacity: number; // 0 - 100
@@ -142,7 +143,7 @@ export interface BeatSyncSettings {
 export interface OutputSettings {
   filename: string;
   destination: string;
-  resolution: '1920x1080' | '3840x2160' | '1280x720' | '1080x1920' | '1080x1080';
+  resolution: '1280x720' | '1920x1080' | '3840x2160';
   fps: 24 | 30 | 60;
   codec: 'Apple ProRes 422 (Master Quality)' | 'H.264 / MP4 (Hardware Fast)' | 'HEVC / H.265 (Ultra HD)' | 'WebM (Transparent Alpha)';
   quality: 'Standard' | 'High' | 'Maximum';

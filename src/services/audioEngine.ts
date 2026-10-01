@@ -1,48 +1,74 @@
+import { AudioTrack } from '../types/project';
+
 /**
- * Real-time Web Audio Engine with FFT Spectral Analysis and Beat Detector
+ * Production-grade Real-Time Web Audio Engine
+ * Handles real user audio sequence playback, timeline synchronization,
+ * spectral FFT analysis, and dynamic beat detection from actual user files.
+ * Zero dummy/mock audio.
  */
+
+export interface AudioAnalysisData {
+  frequencies: Uint8Array;
+  timeDomain: Uint8Array;
+  bass: number;
+  mid: number;
+  treble: number;
+  beatPulse: number;
+  isPlaying: boolean;
+}
 
 class AudioEngineService {
   private ctx: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
   private masterGain: GainNode | null = null;
-  private synthInterval: number | null = null;
-  private isSynthesizing = false;
   private audioElement: HTMLAudioElement | null = null;
   private audioSourceNode: MediaElementAudioSourceNode | null = null;
 
-  // Analysis data caches
-  private freqData = new Uint8Array(new ArrayBuffer(256));
-  private timeData = new Uint8Array(new ArrayBuffer(256));
+  // Track playback state
+  private activeTrackId: string | null = null;
+  private isPreviewingSingleTrack = false;
+
+  // Analysis buffers
+  private freqData = new Uint8Array(256);
+  private timeData = new Uint8Array(256);
   private bassEnergy = 0;
   private midEnergy = 0;
   private trebleEnergy = 0;
   private beatPulse = 0;
+  private bassHistory = 0.1;
 
   constructor() {
-    // Audio context will be lazy-initialized on first user interaction
+    // Audio context is lazily initialized upon first user action to comply with browser autoplay policies
   }
 
   private initContext() {
     if (!this.ctx) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new AudioCtx();
       this.analyser = this.ctx.createAnalyser();
       this.analyser.fftSize = 512;
-      this.analyser.smoothingTimeConstant = 0.82;
+      this.analyser.smoothingTimeConstant = 0.8;
 
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.value = 0.8;
 
+      this.audioElement = new Audio();
+      this.audioElement.crossOrigin = 'anonymous';
+      this.audioElement.preload = 'auto';
+
+      this.audioSourceNode = this.ctx.createMediaElementSource(this.audioElement);
+      this.audioSourceNode.connect(this.analyser);
       this.analyser.connect(this.masterGain);
       this.masterGain.connect(this.ctx.destination);
 
-      this.freqData = new Uint8Array(new ArrayBuffer(this.analyser.frequencyBinCount));
-      this.timeData = new Uint8Array(new ArrayBuffer(this.analyser.frequencyBinCount));
+      this.freqData = new Uint8Array(this.analyser.frequencyBinCount);
+      this.timeData = new Uint8Array(this.analyser.frequencyBinCount);
     }
 
     if (this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      this.ctx.resume().catch(() => {});
     }
   }
 
@@ -50,154 +76,194 @@ class AudioEngineService {
     if (this.masterGain) {
       this.masterGain.gain.value = Math.max(0, Math.min(1, val));
     }
-  }
-
-  public startPlayback(audioUrl?: string) {
-    this.initContext();
-    if (!this.ctx || !this.analyser) return;
-
-    if (audioUrl) {
-      if (!this.audioElement) {
-        this.audioElement = new Audio();
-        this.audioElement.crossOrigin = 'anonymous';
-        this.audioSourceNode = this.ctx.createMediaElementSource(this.audioElement);
-        this.audioSourceNode.connect(this.analyser);
-      }
-      this.audioElement.src = audioUrl;
-      this.audioElement.play().catch(() => {
-        this.startSyntheticBeat();
-      });
-    } else {
-      this.startSyntheticBeat();
+    if (this.audioElement) {
+      this.audioElement.volume = Math.max(0, Math.min(1, val));
     }
   }
 
+  /**
+   * Synchronize audio sequence playback to the master timeline currentTime
+   */
+  public syncSequence(currentTime: number, audioTracks: AudioTrack[], isPlaying: boolean) {
+    if (this.isPreviewingSingleTrack && !isPlaying) {
+      return;
+    }
+    this.isPreviewingSingleTrack = false;
+
+    const activeTracks = audioTracks.filter((t) => !t.isMuted);
+    if (activeTracks.length === 0) {
+      if (this.audioElement && !this.audioElement.paused) {
+        this.audioElement.pause();
+      }
+      this.activeTrackId = null;
+      return;
+    }
+
+    this.initContext();
+    if (!this.audioElement) return;
+
+    // Find which track is active at currentTime
+    let accumulated = 0;
+    let targetTrack: AudioTrack | null = null;
+    let localTime = 0;
+
+    for (let i = 0; i < activeTracks.length; i++) {
+      const track = activeTracks[i];
+      const dur = Math.max(0.1, track.duration || 0);
+      if (currentTime >= accumulated && (currentTime < accumulated + dur || i === activeTracks.length - 1)) {
+        targetTrack = track;
+        localTime = Math.max(0, currentTime - accumulated);
+        break;
+      }
+      accumulated += dur;
+    }
+
+    if (!targetTrack || !targetTrack.url) {
+      if (!this.audioElement.paused) this.audioElement.pause();
+      return;
+    }
+
+    // If active track changed, switch source
+    if (this.activeTrackId !== targetTrack.id) {
+      this.activeTrackId = targetTrack.id;
+      this.audioElement.src = targetTrack.url;
+      this.audioElement.currentTime = localTime;
+      if (isPlaying) {
+        this.audioElement.play().catch(() => {});
+      } else {
+        this.audioElement.pause();
+      }
+      return;
+    }
+
+    // Same track: sync play/pause & drift
+    if (isPlaying) {
+      if (this.audioElement.paused) {
+        this.audioElement.play().catch(() => {});
+      }
+      if (Math.abs(this.audioElement.currentTime - localTime) > 0.4) {
+        this.audioElement.currentTime = localTime;
+      }
+    } else {
+      if (!this.audioElement.paused) {
+        this.audioElement.pause();
+      }
+      if (Math.abs(this.audioElement.currentTime - localTime) > 0.1) {
+        this.audioElement.currentTime = localTime;
+      }
+    }
+  }
+
+  /**
+   * Seek to a specific timestamp on the project timeline
+   */
+  public seekTo(seconds: number, audioTracks: AudioTrack[], isPlaying: boolean) {
+    this.syncSequence(seconds, audioTracks, isPlaying);
+  }
+
+  /**
+   * Preview a single track directly from the Audio List
+   */
+  public playSingleTrack(track: AudioTrack): Promise<void> {
+    this.initContext();
+    if (!this.audioElement || !track.url) return Promise.resolve();
+
+    this.isPreviewingSingleTrack = true;
+    this.activeTrackId = track.id;
+
+    if (this.audioElement.src !== track.url) {
+      this.audioElement.src = track.url;
+    }
+    this.audioElement.currentTime = 0;
+    return this.audioElement.play();
+  }
+
+  /**
+   * Pause any currently running audio playback
+   */
   public pausePlayback() {
-    if (this.audioElement) {
+    if (this.audioElement && !this.audioElement.paused) {
       this.audioElement.pause();
     }
-    this.stopSyntheticBeat();
+    this.isPreviewingSingleTrack = false;
   }
 
-  private startSyntheticBeat() {
-    if (this.isSynthesizing || !this.ctx || !this.analyser) return;
-    this.isSynthesizing = true;
-
-    // 128 BPM synthetic rhythmic engine (Kick, Bass, Synth chords, Hats)
-    const bpm = 128;
-    const intervalMs = (60 / bpm / 4) * 1000; // 16th notes
-    let step = 0;
-
-    this.synthInterval = window.setInterval(() => {
-      if (!this.ctx || !this.analyser || this.ctx.state !== 'running') return;
-      const now = this.ctx.currentTime;
-
-      // 4-on-the-floor kick
-      if (step % 4 === 0) {
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(140, now);
-        osc.frequency.exponentialRampToValueAtTime(38, now + 0.12);
-        gain.gain.setValueAtTime(0.9, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
-        osc.connect(gain);
-        gain.connect(this.analyser);
-        osc.start(now);
-        osc.stop(now + 0.22);
-        this.beatPulse = 1.0;
+  /**
+   * Cleanup resources for a deleted track
+   */
+  public disposeTrack(track: AudioTrack) {
+    if (this.activeTrackId === track.id) {
+      this.pausePlayback();
+      this.activeTrackId = null;
+      if (this.audioElement) {
+        this.audioElement.removeAttribute('src');
+        this.audioElement.load();
       }
-
-      // Snare / Clap on beats 2 & 4 (steps 4 & 12)
-      if (step % 8 === 4) {
-        const bufferSize = this.ctx.sampleRate * 0.08;
-        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-        const output = buffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          output[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.02));
-        }
-        const whiteNoise = this.ctx.createBufferSource();
-        whiteNoise.buffer = buffer;
-        const filter = this.ctx.createBiquadFilter();
-        filter.type = 'highpass';
-        filter.frequency.value = 1000;
-        const gain = this.ctx.createGain();
-        gain.gain.setValueAtTime(0.4, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-        whiteNoise.connect(filter);
-        filter.connect(gain);
-        gain.connect(this.analyser);
-        whiteNoise.start(now);
-      }
-
-      // Synth Arp Pad note
-      if (step % 2 === 0) {
-        const notes = [220, 261.63, 293.66, 329.63, 392, 440];
-        const freq = notes[Math.floor(Math.random() * notes.length)];
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(freq, now);
-        gain.gain.setValueAtTime(0.18, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-        osc.connect(gain);
-        gain.connect(this.analyser);
-        osc.start(now);
-        osc.stop(now + 0.35);
-      }
-
-      step = (step + 1) % 16;
-    }, intervalMs);
-  }
-
-  private stopSyntheticBeat() {
-    this.isSynthesizing = false;
-    if (this.synthInterval) {
-      clearInterval(this.synthInterval);
-      this.synthInterval = null;
+    }
+    if (track.url && track.url.startsWith('blob:')) {
+      try {
+        URL.revokeObjectURL(track.url);
+      } catch (_) {}
     }
   }
 
-  public getAudioAnalysis() {
-    if (this.analyser) {
+  public getActiveTrackId(): string | null {
+    return this.activeTrackId;
+  }
+
+  public isAudioPlaying(): boolean {
+    return this.audioElement ? !this.audioElement.paused : false;
+  }
+
+  /**
+   * Centralized real-time audio analysis and beat detection from the actual audio source
+   */
+  public getAudioAnalysis(): AudioAnalysisData {
+    const isPlaying = this.isAudioPlaying();
+
+    if (this.analyser && isPlaying) {
       this.analyser.getByteFrequencyData(this.freqData);
       this.analyser.getByteTimeDomainData(this.timeData);
 
-      // Compute multi-band spectral energy
-      let bassSum = 0;
-      let midSum = 0;
-      let trebleSum = 0;
-
       const len = this.freqData.length;
-      const bassCutoff = Math.floor(len * 0.12);
-      const midCutoff = Math.floor(len * 0.5);
+      const bassCutoff = Math.floor(len * 0.12); // ~0 - 250 Hz
+      const midCutoff = Math.floor(len * 0.5);   // ~250 - 2500 Hz
+
+      let bSum = 0;
+      let mSum = 0;
+      let tSum = 0;
 
       for (let i = 0; i < len; i++) {
         const val = this.freqData[i] / 255;
         if (i < bassCutoff) {
-          bassSum += val;
+          bSum += val;
         } else if (i < midCutoff) {
-          midSum += val;
+          mSum += val;
         } else {
-          trebleSum += val;
+          tSum += val;
         }
       }
 
-      this.bassEnergy = bassSum / (bassCutoff || 1);
-      this.midEnergy = midSum / ((midCutoff - bassCutoff) || 1);
-      this.trebleEnergy = trebleSum / ((len - midCutoff) || 1);
+      this.bassEnergy = bSum / (bassCutoff || 1);
+      this.midEnergy = mSum / ((midCutoff - bassCutoff) || 1);
+      this.trebleEnergy = tSum / ((len - midCutoff) || 1);
+
+      // Real dynamic beat detection based on energy rise
+      this.bassHistory = this.bassHistory * 0.94 + this.bassEnergy * 0.06;
+      if (this.bassEnergy > this.bassHistory * 1.32 + 0.08 && this.beatPulse < 0.35) {
+        this.beatPulse = Math.min(1.0, this.bassEnergy * 1.25);
+      }
     } else {
-      // Fallback ambient motion when paused
-      this.bassEnergy = 0.05 + Math.sin(Date.now() * 0.002) * 0.03;
-      this.midEnergy = 0.08 + Math.cos(Date.now() * 0.003) * 0.04;
-      this.trebleEnergy = 0.04 + Math.sin(Date.now() * 0.005) * 0.02;
+      // Clean silence / zero baseline when audio is not playing
+      this.freqData.fill(0);
+      this.timeData.fill(128); // 128 is center for 8-bit time-domain PCM
+      this.bassEnergy = 0;
+      this.midEnergy = 0;
+      this.trebleEnergy = 0;
     }
 
-    // Beat pulse decay
+    // Decay beat pulse
     this.beatPulse *= 0.88;
-    if (this.bassEnergy > 0.65 && this.beatPulse < 0.3) {
-      this.beatPulse = Math.min(1.0, this.bassEnergy * 1.2);
-    }
 
     return {
       frequencies: this.freqData,
@@ -206,7 +272,7 @@ class AudioEngineService {
       mid: this.midEnergy,
       treble: this.trebleEnergy,
       beatPulse: this.beatPulse,
-      isSynthesizing: this.isSynthesizing,
+      isPlaying,
     };
   }
 }

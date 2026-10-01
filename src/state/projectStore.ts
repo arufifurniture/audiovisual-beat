@@ -5,106 +5,8 @@ import { audioEngine } from '../services/audioEngine';
 export const initialProjectState: ProjectState = {
   projectName: 'Astra_Spectra_Master',
   author: 'Ridwan Johari',
-  visualTracks: [
-    {
-      id: 'file-2',
-      name: 'Cyber_Grid_Texture.png',
-      type: 'image',
-      info: 'PNG Overlay • Blend: Screen',
-      duration: 30,
-      resolution: '1920x1080',
-      fps: 60,
-      opacity: 85,
-      scale: 1.0,
-      rotation: 0,
-      blendMode: 'Screen',
-      anchor: 'CTR',
-      isVisible: true,
-      isMuted: true,
-      chromaKey: false,
-    },
-    {
-      id: 'file-3',
-      name: 'Neon_Cyber_Core.mov',
-      type: 'video',
-      info: 'Alpha Channel • Keyed',
-      duration: 15,
-      resolution: '1920x1080',
-      fps: 60,
-      opacity: 100,
-      scale: 1.0,
-      rotation: 0,
-      blendMode: 'Add',
-      anchor: 'CTR',
-      isVisible: true,
-      isMuted: true,
-      chromaKey: true,
-    },
-    {
-      id: 'file-1',
-      name: 'Abstract_Loop_BG.mp4',
-      type: 'video',
-      info: '1080p • 60fps • 00:24',
-      duration: 24,
-      resolution: '1920x1080',
-      fps: 60,
-      opacity: 100,
-      scale: 1.0,
-      rotation: 0,
-      blendMode: 'Normal',
-      anchor: 'CTR',
-      isVisible: true,
-      isMuted: false,
-      chromaKey: false,
-    },
-  ],
-  audioTracks: [
-    {
-      id: 'audio-1',
-      name: 'Starlight_Synth_Master.wav',
-      info: '03:42 • 48kHz / 24-bit',
-      duration: 222,
-      sampleRate: '48 kHz',
-      bitrate: '24-bit',
-      gainDb: 1.2,
-      pan: 0,
-      eqLowDb: 4,
-      eqMidDb: -1,
-      eqHighDb: 5,
-      isMuted: false,
-      isSolo: false,
-    },
-    {
-      id: 'audio-2',
-      name: 'Sub_Bass_Drop_808.wav',
-      info: '01:15 • 44.1kHz / 24-bit',
-      duration: 75,
-      sampleRate: '44.1 kHz',
-      bitrate: '24-bit',
-      gainDb: 0,
-      pan: 0,
-      eqLowDb: 6,
-      eqMidDb: 0,
-      eqHighDb: 2,
-      isMuted: false,
-      isSolo: false,
-    },
-    {
-      id: 'audio-3',
-      name: 'Cyber_Atmosphere_Loop.mp3',
-      info: '02:20 • 320kbps',
-      duration: 140,
-      sampleRate: '44.1 kHz',
-      bitrate: '320 kbps',
-      gainDb: -0.5,
-      pan: 0,
-      eqLowDb: 0,
-      eqMidDb: 2,
-      eqHighDb: 3,
-      isMuted: false,
-      isSolo: false,
-    },
-  ],
+  visualTracks: [],
+  audioTracks: [],
   intros: [
     {
       id: 'intro-1',
@@ -221,17 +123,17 @@ export const initialProjectState: ProjectState = {
   },
   outputSettings: {
     filename: 'Astra_Spectra_Master',
-    destination: '/Users/ridwan/Movies/AuviBeat_Renders',
-    resolution: '1920x1080',
+    destination: 'Downloads',
+    resolution: '1280x720',
     fps: 60,
-    codec: 'Apple ProRes 422 (Master Quality)',
+    codec: 'H.264 / MP4 (Hardware Fast)',
     quality: 'High',
     hardwareAcceleration: 'VideoToolbox (Apple Silicon)',
     autoIncrement: true,
   },
   isPlaying: false,
-  currentTime: 78, // 01:18
-  totalDuration: 437, // 07:17
+  currentTime: 0,
+  totalDuration: 0,
   volume: 80,
   isLooping: true,
   currentFps: 60,
@@ -261,9 +163,11 @@ export function setProjectState(updater: Partial<ProjectState> | ((prev: Project
   const updates = typeof updater === 'function' ? updater(globalState) : updater;
   globalState = { ...globalState, ...updates };
 
-  // Recalculate total duration if audio tracks change
-  if (updates.audioTracks) {
-    globalState.totalDuration = globalState.audioTracks.reduce((sum, t) => sum + (t.duration || 0), 0);
+  // Recalculate total duration: Audio is Master Timeline. If only visuals exist, use visuals duration.
+  if (updates.audioTracks || updates.visualTracks) {
+    const audioDur = globalState.audioTracks.reduce((sum, t) => sum + (t.duration || 0), 0);
+    const visualDur = globalState.visualTracks.reduce((sum, t) => sum + (t.duration || 0), 0);
+    globalState.totalDuration = audioDur > 0 ? audioDur : visualDur;
   }
 
   listeners.forEach((listener) => listener(globalState));
@@ -306,7 +210,7 @@ export function togglePlayback() {
   const nextPlaying = !globalState.isPlaying;
   setProjectState({ isPlaying: nextPlaying });
   if (nextPlaying) {
-    audioEngine.startPlayback();
+    audioEngine.syncSequence(globalState.currentTime, globalState.audioTracks, true);
   } else {
     audioEngine.pausePlayback();
   }
@@ -315,4 +219,5 @@ export function togglePlayback() {
 export function seekTime(seconds: number) {
   const clamped = Math.max(0, Math.min(globalState.totalDuration, seconds));
   setProjectState({ currentTime: clamped });
+  audioEngine.seekTo(clamped, globalState.audioTracks, globalState.isPlaying);
 }
