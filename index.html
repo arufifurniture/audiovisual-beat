@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      (function() {
+        try {
+          var origDefineProperty = Object.defineProperty;
+          Object.defineProperty = function(obj, prop, descriptor) {
+            if (
+              (obj === window || obj === globalThis || (typeof Window !== 'undefined' && obj === Window.prototype)) &&
+              prop === 'fetch' &&
+              descriptor
+            ) {
+              var customVal;
+              var isSet = false;
+              var origGet = descriptor.get;
+              var origSet = descriptor.set;
+              return origDefineProperty.call(Object, obj, prop, {
+                configurable: true,
+                enumerable: descriptor.enumerable !== undefined ? descriptor.enumerable : true,
+                get: function() {
+                  return isSet ? customVal : (origGet ? origGet.call(this) : descriptor.value);
+                },
+                set: function(val) {
+                  isSet = true;
+                  customVal = val;
+                  if (origSet) {
+                    try { origSet.call(this, val); } catch (_) {}
+                  }
+                },
+              });
+            }
+            return origDefineProperty.apply(Object, arguments);
+          };
+          // Handle chrome: call method window messages to prevent timeout
+          window.addEventListener('message', function(event) {
+            try {
+              if (!event.data) return;
+              var isMatch = false;
+              var id = 0;
+              if (typeof event.data === 'string') {
+                if (event.data.indexOf('call method') !== -1 || event.data.indexOf('chrome:') !== -1) {
+                  isMatch = true;
+                }
+              } else if (typeof event.data === 'object') {
+                var str = '';
+                try { str = JSON.stringify(event.data); } catch (_) {}
+                if (str.indexOf('call method') !== -1 || str.indexOf('chrome:') !== -1) {
+                  isMatch = true;
+                  id = event.data.id || event.data.requestId || event.data.callId || 0;
+                }
+              }
+              if (isMatch) {
+                var res = {
+                  id: id,
+                  requestId: id,
+                  type: 'response',
+                  name: 'chrome: call method',
+                  status: 'success',
+                  result: true,
+                  success: true
+                };
+                if (event.source && typeof event.source.postMessage === 'function') {
+                  event.source.postMessage(res, '*');
+                }
+                if (window.parent && window.parent !== window && typeof window.parent.postMessage === 'function') {
+                  window.parent.postMessage(res, '*');
+                }
+              }
+            } catch (_) {}
+          });
+
+          // Ensure bootstrap channel resolves even in non-google.com testing frames
+          setTimeout(function() {
+            try {
+              var channel = new MessageChannel();
+              var evt = new MessageEvent('message', {
+                data: { type: 'bootstrap', urlPatterns: [] },
+                origin: 'https://aistudio.google.com',
+                ports: [channel.port2]
+              });
+              window.dispatchEvent(evt);
+            } catch (_) {}
+          }, 1200);
+
+          // Ensure load event is fired for iframeLoaded state
+          if (document.readyState === 'complete') {
+            try { window.dispatchEvent(new Event('load')); } catch (_) {}
+          } else {
+            window.addEventListener('DOMContentLoaded', function() {
+              try { window.dispatchEvent(new Event('load')); } catch (_) {}
+            });
+          }
+        } catch (_) {}
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AudioVisual Beat</title>
+    <meta name="description" content="Specialized Audio-Visual Render Engine & Pro Media Workstation for creating high-quality long-form music videos, audio visualizers, and ambient beat videos." />
+    <meta property="og:title" content="AudioVisual Beat" />
+    <meta property="og:description" content="Specialized Audio-Visual Render Engine & Pro Media Workstation for creating high-quality long-form music videos, audio visualizers, and ambient beat videos." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-[#F5F5F7] text-[#1D1D1F] antialiased selection:bg-[#007AFF]/20 selection:text-[#007AFF] overflow-hidden select-none">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

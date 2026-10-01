@@ -1,0 +1,6 @@
+{
+  "name": "AudioVisual Beat",
+  "description": "Specialized Audio-Visual Render Engine & Pro Media Workstation for creating high-quality long-form music videos, audio visualizers, and ambient beat videos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
